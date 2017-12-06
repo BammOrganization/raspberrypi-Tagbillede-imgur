@@ -1,16 +1,9 @@
-
 from RPi import GPIO
 from time import sleep
+from datetime import datetime
 import picamera
-from datetime import datetime
-
 import pyimgur
-
-BROADCAST_TO_PORT = 7000
-import time
 from socket import *
-from datetime import datetime
- 
 
 clk = 15
 dt = 14
@@ -18,8 +11,18 @@ dt = 14
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(clk, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(dt, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-counter = 0
+
 clkLastState = GPIO.input(clk)
+BROADCAST_TO_PORT = 7000
+dBCounter = 40
+dBSumFiveSeconds = 0
+dBAverage = 0
+countOneSecond = 0
+countFiveSeconds = 0
+
+s = socket(AF_INET, SOCK_DGRAM)
+s.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)
+
 
 def TakePicture():
     presentime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -40,38 +43,51 @@ def TakePicture():
     return ImgurLink
 
 
+def SendData(link):
+    data = "Current time " + str(datetime.now()) + " dBAverage: " + str(dBAverage)
+    if len(link) > 0:
+        data = data + " Link Imgur: " + link        
+    s.sendto(bytes(data, "UTF-8"), ('<broadcast>', BROADCAST_TO_PORT))
+    print(data)
 
-s = socket(AF_INET, SOCK_DGRAM)
-#s.bind(('', 14593))     # (ip, port)
-# no explicit bind: will bind to default IP + random port
-s.setsockopt(SOL_SOCKET, SO_BROADCAST, 1)
 
-while True:
-    try:
-        while True:
-            clkState = GPIO.input(clk)
-            dtState = GPIO.input(dt)
-            if clkState != clkLastState:
-                if dtState != clkState:
-                    counter += 1
-                else:
-                    counter -= 1
-                print (counter)
+try:
+    while True:         
+        clkState = GPIO.input(clk)
+        dtState = GPIO.input(dt)
+            
+        if clkState != clkLastState:                
+            if dtState != clkState:
+                dBCounter += 1
+            else:
+                dBCounter -= 1
+            clkLastState = clkState 
 
-                data = "Current time " + str(datetime.now()) + " Counter: " + str(counter)
-                s.sendto(bytes(data, "UTF-8"), ('<broadcast>', BROADCAST_TO_PORT))
-                print(data)
-
-                clkLastState = clkState
-                sleep(0.01)
-                if counter >= 50:
+        sleep(0.01)
+        countOneSecond += 1
+        if countOneSecond == 100:                        # 1 second (100 * 0.01 sleep)
+             countOneSecond = 0 
+             countFiveSeconds += 1
+             dBSumFiveSeconds += dBCounter
+             print("dBCounter: "+ str(dBCounter))
+             
+             if countFiveSeconds == 5:
+                 countFiveSeconds = 0                 
+                 dBAverage = dBSumFiveSeconds // 5
+                 dBSumFiveSeconds = 0
+                   
+                 if dBAverage >= 50:                         # over 50 dB  
                     LinkImgur = TakePicture()
-                    dataPicTaken = "Current time " + str(datetime.now()) + " Counter: " + str(counter) + " Link Imgur: " + LinkImgur
-                    s.sendto(bytes(dataPicTaken, "UTF-8"), ('<broadcast>', BROADCAST_TO_PORT))
-                    print(dataPicTaken)
+                    SendData(LinkImgur)                   
+                 else:
+                    SendData("")
+             
+                 
 
-    finally:
-        GPIO.cleanup()
+finally:    
+    GPIO.cleanup()
+        
+        
 
         
 
